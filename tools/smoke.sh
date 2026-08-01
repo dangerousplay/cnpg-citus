@@ -32,15 +32,26 @@ initdb -U postgres >/dev/null 2>&1 || fail "initdb"
 {
   echo "shared_preload_libraries = 'citus,pg_cron,pgaudit,pg_stat_statements${WITH_DURABLE:+,pg_durable}'"
   echo "max_prepared_transactions = 100"
-  echo "cron.database_name = 'smoke'"
-  [ "$WITH_DURABLE" = "true" ] && echo "pg_durable.database = 'smoke'"
+  echo "cron.database_name = 'postgres'"
+  [ "$WITH_DURABLE" = "true" ] && echo "pg_durable.database = 'postgres'"
 } >> "$PGDATA/postgresql.conf"
 
 pg_ctl -D "$PGDATA" -l /tmp/log -w start >/dev/null 2>&1 || {
   echo "--- postmaster log ---"; tail -40 /tmp/log; fail "postmaster did not start";
 }
 
-psql -U postgres -qc "CREATE DATABASE smoke;"
+# Everything runs in `postgres`, which initdb has already created, rather than
+# in a database made after startup. pg_cron's and pg_durable's background
+# workers connect to their configured database the moment the postmaster is up,
+# so a database created a second later gives them a window to fail in:
+#
+#   FATAL: database "smoke" does not exist
+#
+# They retry and recover, but the FATAL is real and in the log, and the check
+# at the end of this script refuses to distinguish a harmless FATAL from a
+# meaningful one — correctly, since the next person to add a "known benign"
+# pattern is how that check stops working. Removing the race is better than
+# teaching the check to ignore things.
 
 # `vector`, not `pgvector`: the Debian package is postgresql-17-pgvector
 # but the extension it installs is called vector.
@@ -48,51 +59,51 @@ EXTS="citus vector pg_cron pg_partman pg_repack hypopg hll pgaudit pg_stat_state
 [ "$WITH_DURABLE" = "true" ] && EXTS="$EXTS pg_durable"
 
 for ext in $EXTS; do
-  psql -U postgres -d smoke -qc "CREATE EXTENSION IF NOT EXISTS \"$ext\" CASCADE;" \
+  psql -U postgres -d postgres -qc "CREATE EXTENSION IF NOT EXISTS \"$ext\" CASCADE;" \
     || fail "CREATE EXTENSION $ext"
 done
 
 echo "--- extensions ---"
-psql -U postgres -d smoke -Atc \
+psql -U postgres -d postgres -Atc \
   "select '  '||extname||' '||extversion from pg_extension order by 1;"
 
 # Creating an extension is not using it. These are the operations that would
 # actually break if a library were subtly wrong for the architecture.
 echo "--- exercising ---"
 
-psql -U postgres -d smoke -q \
+psql -U postgres -d postgres -q \
   -c "CREATE TABLE t (gid bigint, id bigserial, body text, PRIMARY KEY (gid, id));" \
   -c "CREATE TABLE r (k int PRIMARY KEY);"
-psql -U postgres -d smoke -Atc "SELECT create_distributed_table('t','gid');" >/dev/null \
+psql -U postgres -d postgres -Atc "SELECT create_distributed_table('t','gid');" >/dev/null \
   || fail "create_distributed_table"
-psql -U postgres -d smoke -Atc "SELECT create_reference_table('r');" >/dev/null \
+psql -U postgres -d postgres -Atc "SELECT create_reference_table('r');" >/dev/null \
   || fail "create_reference_table"
-psql -U postgres -d smoke -qc \
+psql -U postgres -d postgres -qc \
   "INSERT INTO t(gid, body) SELECT i % 8, 'row '||i FROM generate_series(1,1000) i;"
-rows=$(psql -U postgres -d smoke -Atc "SELECT count(*) FROM t;")
-shards=$(psql -U postgres -d smoke -Atc \
+rows=$(psql -U postgres -d postgres -Atc "SELECT count(*) FROM t;")
+shards=$(psql -U postgres -d postgres -Atc \
   "SELECT count(*) FROM pg_dist_shard WHERE logicalrelid='t'::regclass;")
 [ "$rows" = "1000" ] || fail "expected 1000 rows across shards, got $rows"
 echo "  citus:    $rows rows across $shards shards"
 
 # pgvector: an index build is where a bad build shows up, not the CREATE.
-psql -U postgres -d smoke -q \
+psql -U postgres -d postgres -q \
   -c "CREATE TABLE v (id int, e vector(3));" \
   -c "INSERT INTO v SELECT i, ('['||i||','||(i+1)||','||(i+2)||']')::vector FROM generate_series(1,100) i;" \
   -c "CREATE INDEX ON v USING hnsw (e vector_l2_ops);"
-near=$(psql -U postgres -d smoke -Atc "SELECT id FROM v ORDER BY e <-> '[1,2,3]' LIMIT 1;")
+near=$(psql -U postgres -d postgres -Atc "SELECT id FROM v ORDER BY e <-> '[1,2,3]' LIMIT 1;")
 [ "$near" = "1" ] || fail "pgvector nearest neighbour returned $near, expected 1"
 echo "  pgvector: hnsw index built, nearest neighbour correct"
 
-hll=$(psql -U postgres -d smoke -Atc \
+hll=$(psql -U postgres -d postgres -Atc \
   "SELECT hll_cardinality(hll_add_agg(hll_hash_integer(i))) FROM generate_series(1,1000) i;")
 echo "  hll:      cardinality estimate $hll for 1000 distinct"
 
-psql -U postgres -d smoke -Atc "SELECT cron.schedule('smoke','5 seconds','SELECT 1');" >/dev/null \
+psql -U postgres -d postgres -Atc "SELECT cron.schedule('smoke','5 seconds','SELECT 1');" >/dev/null \
   || fail "pg_cron schedule"
 echo "  pg_cron:  job scheduled"
 
-psql -U postgres -d smoke -Atc \
+psql -U postgres -d postgres -Atc \
   "SELECT count(*) FROM hypopg_create_index('CREATE INDEX ON t (body)');" >/dev/null \
   || fail "hypopg"
 echo "  hypopg:   hypothetical index created"
@@ -104,7 +115,7 @@ if [ "$WITH_DURABLE" = "true" ]; then
   done
   grep -q "duroxide runtime started" /tmp/log \
     || { tail -20 /tmp/log; fail "pg_durable worker never started"; }
-  n=$(psql -U postgres -d smoke -Atc \
+  n=$(psql -U postgres -d postgres -Atc \
     "SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='df';")
   [ "$n" -gt 0 ] || fail "pg_durable installed no functions in schema df"
   echo "  durable:  worker running, $n functions in schema df"
@@ -116,6 +127,9 @@ command -v barman-cloud-wal-archive >/dev/null || fail "barman-cloud is missing"
 [ "$(id -u)" = "26" ] || fail "expected to run as uid 26, got $(id -u)"
 echo "  cnpg:     barman-cloud present, running as uid 26"
 
+# No allowances. A FATAL in a run this short is either a real problem or a race
+# worth removing, and the version-mismatch failure that reached CI once already
+# announced itself exactly this way.
 if grep -qE "FATAL|PANIC" /tmp/log; then
   echo "--- FATAL/PANIC in log ---"; grep -E "FATAL|PANIC" /tmp/log | head -5
   fail "postmaster logged FATAL or PANIC"
