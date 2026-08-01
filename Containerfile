@@ -21,6 +21,26 @@
 ARG PG_MAJOR=17
 ARG BASE_IMAGE=ghcr.io/cloudnative-pg/postgresql
 
+# The exact PostgreSQL package version, used on BOTH sides of the build.
+#
+# This is not tidiness, it is the difference between a working image and this:
+#
+#   FATAL: could not load library ".../citus.so": undefined symbol: palloc0_mul
+#
+# Citus is compiled against postgresql-server-dev-17 and loaded by the server
+# in the final stage. If those are different minors, the extension can
+# reference a backend symbol the running server does not export, and it fails
+# at load — after the image has built perfectly.
+#
+# The two cannot simply be left to agree on their own. The CloudNativePG base
+# image's 17-bookworm tag currently carries 17.6, and apt.postgresql.org no
+# longer publishes 17.6 at all — only 17.8 and newer — so an unpinned
+# server-dev resolves to 17.10 against a 17.6 server every single time.
+# Pinning the header package to the base image's version is therefore not
+# possible; the server is upgraded to meet the headers instead, which is a
+# routine same-major minor bump that also picks up the fixes 17.6 is missing.
+ARG PG_FULL_VERSION=17.10-1.pgdg12+1
+
 # --------------------------------------------------------------------------- #
 # builder — compiles what has no arm64 package, then throws the toolchain away
 # --------------------------------------------------------------------------- #
@@ -33,13 +53,14 @@ ARG WITH_DURABLE=true
 
 USER root
 
+ARG PG_FULL_VERSION
 RUN set -eux; \
     apt-get update; \
     apt-get install -y --no-install-recommends \
       build-essential ca-certificates curl git flex libcurl4-openssl-dev \
       libicu-dev libkrb5-dev liblz4-dev libpam0g-dev libreadline-dev \
       libselinux1-dev libssl-dev libxslt1-dev libzstd-dev pkg-config \
-      "postgresql-server-dev-${PG_MAJOR}" zlib1g-dev; \
+      "postgresql-server-dev-${PG_MAJOR}=${PG_FULL_VERSION}" zlib1g-dev; \
     rm -rf /var/lib/apt/lists/*
 
 # --- Citus ----------------------------------------------------------------- #
@@ -111,6 +132,19 @@ ARG WITH_DURABLE=true
 
 USER root
 
+ARG PG_FULL_VERSION
+
+# Bring the server up to the version the extensions were compiled against. The
+# base image is behind what apt.postgresql.org still carries, so this is an
+# upgrade rather than a pin — same major, so no dump and restore, and it is
+# the only way to make the two halves agree.
+RUN set -eux; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends \
+      "postgresql-${PG_MAJOR}=${PG_FULL_VERSION}" \
+      "postgresql-client-${PG_MAJOR}=${PG_FULL_VERSION}"; \
+    rm -rf /var/lib/apt/lists/*
+
 # PGDG ships all of these for both architectures, so there is no reason to
 # compile them. Chosen to be useful without being opinionated: vector search,
 # scheduling, partition maintenance, bloat removal, index experiments,
@@ -132,6 +166,12 @@ COPY --from=builder /staging/ /
 # Fail the build, not the cluster. Without this the image builds clean and the
 # first CREATE EXTENSION fails inside a CNPG initdb Job, where the reason is
 # several containers deep and reads like a broken operator.
+#
+# The last check is the one that matters most: it asserts the running server is
+# the same minor the extensions were compiled against. A drifting base image
+# would otherwise produce an image that builds, passes every file test, and
+# then refuses to start with "undefined symbol". barman-cloud is checked too,
+# since a careless apt step can remove it and it is CNPG's contract.
 # `vector`, not `pgvector`: the Debian package is postgresql-17-pgvector but
 # the extension it installs is called vector. Comments live outside the RUN —
 # a `#` line inside a backslash continuation is a parser quirk worth not
@@ -146,8 +186,13 @@ RUN set -eux; \
       test -f "/usr/share/postgresql/${PG_MAJOR}/extension/pg_durable.control"; \
       test -f "/usr/lib/postgresql/${PG_MAJOR}/lib/pg_durable.so"; \
     fi; \
-    # barman-cloud is CNPG's contract, and a careless apt step can remove it.
-    test -x /usr/local/bin/barman-cloud-wal-archive
+    test -x /usr/local/bin/barman-cloud-wal-archive; \
+    running="$(/usr/lib/postgresql/${PG_MAJOR}/bin/postgres --version | cut -d" " -f3)"; \
+    echo "server ${running}, compiled against ${PG_FULL_VERSION}"; \
+    case "${PG_FULL_VERSION}" in \
+      "${running}-"*) echo "versions agree" ;; \
+      *) echo "MISMATCH: server ${running}, headers ${PG_FULL_VERSION}"; exit 1 ;; \
+    esac
 
 LABEL org.opencontainers.image.title="cnpg-citus" \
       org.opencontainers.image.description="CloudNativePG-compatible PostgreSQL with Citus and a default extension set" \
