@@ -47,7 +47,9 @@ spec:
   imageName: ghcr.io/OWNER/cnpg-citus:17-citus13.3.0
 
   postgresql:
-    shared_preload_libraries: [citus, pg_cron, pg_durable, pg_stat_statements]
+    # citus, pg_cron, pgaudit and pg_durable all refuse to be created unless
+    # they are preloaded, and each only says so at CREATE EXTENSION time.
+    shared_preload_libraries: [citus, pg_cron, pgaudit, pg_durable, pg_stat_statements]
     pg_hba:
       # Citus registers the coordinator as localhost:5432 and reaches its own
       # shards over TCP even when every shard is local. That connection has no

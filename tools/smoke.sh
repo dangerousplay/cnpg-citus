@@ -22,11 +22,15 @@ echo "postgres: $(postgres --version)"
 
 initdb -U postgres >/dev/null 2>&1 || fail "initdb"
 
-# citus and pg_durable register background workers and must be preloaded.
-# max_prepared_transactions is not optional for Citus: cross-shard writes use
-# two-phase commit and fail outright at the default of 0.
+# Four of these refuse to be created unless they are preloaded, and each says
+# so only at CREATE EXTENSION time: citus and pg_durable register background
+# workers, pg_cron schedules one, and pgaudit hooks the executor
+# ("pgaudit must be loaded via shared_preload_libraries").
+#
+# max_prepared_transactions is not optional for Citus either: cross-shard
+# writes use two-phase commit and fail outright at the default of 0.
 {
-  echo "shared_preload_libraries = 'citus,pg_cron,pg_stat_statements${WITH_DURABLE:+,pg_durable}'"
+  echo "shared_preload_libraries = 'citus,pg_cron,pgaudit,pg_stat_statements${WITH_DURABLE:+,pg_durable}'"
   echo "max_prepared_transactions = 100"
   echo "cron.database_name = 'smoke'"
   [ "$WITH_DURABLE" = "true" ] && echo "pg_durable.database = 'smoke'"
