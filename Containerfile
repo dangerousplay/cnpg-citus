@@ -18,6 +18,16 @@
 # WAL archiving and backup, and uid 26. Adding extensions to CNPG's image keeps
 # that contract; starting from citusdata/citus would mean rebuilding it.
 
+# PostgreSQL 17, not 18, and that is a deliberate reading of "latest stable".
+# PostgreSQL 18 itself is stable (PGDG ships 18.4), but CloudNativePG has not
+# published a stable 18 image: its 18-bookworm tag carries 18~rc1 and every
+# other 18 tag is a beta. The server binaries could be upgraded past that the
+# same way the 17 ones are, but the rest of the image — barman-cloud, the
+# entrypoint, the uid setup — would still come off a release-candidate build
+# line, and that is not a base to put a database on.
+#
+# Revisit when cloudnative-pg/postgresql:18-bookworm stops being an RC. Citus
+# 14.1 already supports 18, so this file will need only the two numbers.
 ARG PG_MAJOR=17
 ARG BASE_IMAGE=ghcr.io/cloudnative-pg/postgresql
 
@@ -47,7 +57,7 @@ ARG PG_FULL_VERSION=17.10-1.pgdg12+1
 FROM ${BASE_IMAGE}:${PG_MAJOR}-bookworm AS builder
 
 ARG PG_MAJOR=17
-ARG CITUS_VERSION=13.3.0
+ARG CITUS_VERSION=14.1.0
 ARG PG_DURABLE_VERSION=0.2.5
 ARG WITH_DURABLE=true
 
@@ -126,7 +136,7 @@ RUN set -eux; \
 FROM ${BASE_IMAGE}:${PG_MAJOR}-bookworm
 
 ARG PG_MAJOR=17
-ARG CITUS_VERSION=13.3.0
+ARG CITUS_VERSION=14.1.0
 ARG PG_DURABLE_VERSION=0.2.5
 ARG WITH_DURABLE=true
 

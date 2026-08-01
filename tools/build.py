@@ -18,7 +18,7 @@ build only the one you are on.
     ./tools/build.py --arch amd64,arm64       # both, QEMU for the foreign one
     ./tools/build.py --test                   # build, then run the smoke test
     ./tools/build.py --push --registry ghcr.io/you
-    ./tools/build.py --pg 17 --citus 13.3.0 --no-durable
+    ./tools/build.py --pg 17 --citus 14.1.0 --no-durable
 
 Nothing is pushed unless --push is given, and --push refuses to run if the
 smoke test has not passed in the same invocation.
@@ -181,7 +181,7 @@ def main() -> int:
     parser.add_argument("--arch", default=host_arch(),
                         help=f"comma-separated: {','.join(ARCHES)} (default: this host)")
     parser.add_argument("--pg", default="17", help="PostgreSQL major (default 17)")
-    parser.add_argument("--citus", default="13.3.0", help="Citus version (default 13.3.0)")
+    parser.add_argument("--citus", default="14.1.0", help="Citus version (default 14.1.0)")
     parser.add_argument("--durable-version", default="0.2.5", help="pg_durable version")
     parser.add_argument("--no-durable", dest="durable", action="store_false",
                         help="skip pg_durable — much faster, it is a Rust build")
