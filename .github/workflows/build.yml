@@ -50,9 +50,6 @@ jobs:
           - arch: arm64
             runner: ubuntu-24.04-arm
     runs-on: ${{ matrix.runner }}
-    outputs:
-      digest-amd64: ${{ steps.export.outputs.digest-amd64 }}
-      digest-arm64: ${{ steps.export.outputs.digest-arm64 }}
     steps:
       - uses: actions/checkout@v5
 
@@ -119,10 +116,24 @@ jobs:
           cache-from: type=gha,scope=${{ matrix.arch }}
           outputs: type=image,name=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }},push-by-digest=true,name-canonical=true,push=true
 
+      # Not a job output. A matrix job's `outputs` are merged across legs with
+      # last-writer-wins, and every leg evaluates every expression — so the leg
+      # that did not set `digest-arm64` contributes an empty string for it, and
+      # whichever finishes last decides. The digests would be silently empty
+      # about half the time. One artifact per architecture has no such race.
       - name: Export digest
-        id: export
         if: github.event_name != 'pull_request'
-        run: echo "digest-${{ matrix.arch }}=${{ steps.push.outputs.digest }}" >> "$GITHUB_OUTPUT"
+        run: |
+          mkdir -p /tmp/digests
+          echo -n "${{ steps.push.outputs.digest }}" > "/tmp/digests/${{ matrix.arch }}"
+
+      - uses: actions/upload-artifact@v4
+        if: github.event_name != 'pull_request'
+        with:
+          name: digest-${{ matrix.arch }}
+          path: /tmp/digests/*
+          if-no-files-found: error
+          retention-days: 1
 
   merge:
     # Only now does anything acquire a tag people will pull.
@@ -130,6 +141,12 @@ jobs:
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-24.04
     steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: /tmp/digests
+          pattern: digest-*
+          merge-multiple: true
+
       - uses: docker/setup-buildx-action@v3
 
       - uses: docker/login-action@v3
@@ -151,9 +168,18 @@ jobs:
 
       - name: Create the manifest list
         run: |
-          set -eux
-          digests="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ needs.build.outputs.digest-amd64 }} \
-                   ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ needs.build.outputs.digest-arm64 }}"
+          set -euo pipefail
+          # Refuse to publish a partial list. Without this an absent digest
+          # would produce a single-architecture image under a tag that claims
+          # to serve both.
+          for arch in amd64 arm64; do
+            [ -s "/tmp/digests/$arch" ] || { echo "no digest for $arch"; exit 1; }
+          done
+          digests=""
+          for arch in amd64 arm64; do
+            digests="$digests ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@$(cat /tmp/digests/$arch)"
+          done
+          echo "assembling from:$digests"
           for tag in $(jq -r '.tags[]' <<< '${{ steps.meta.outputs.json }}'); do
             docker buildx imagetools create -t "$tag" $digests
           done

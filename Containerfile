@@ -62,6 +62,17 @@ RUN set -eux; \
 # — pgrx is tightly coupled to its build tool and a mismatched cargo-pgrx fails
 # late, during schema generation, rather than at resolve time.
 #
+# No --sudo. This stage already runs as root, and the flag makes cargo-pgrx
+# shell out to a `sudo` binary the image does not contain. It fails *after* a
+# five-minute compile has succeeded, with "Finished installing pg_durable"
+# immediately followed by:
+#
+#   Error:
+#      0: No such file or directory (os error 2)
+#      Location: .../cargo-pgrx-0.16.1/src/command/sudo_install.rs:91
+#
+# which reads as a missing source file rather than a missing interpreter.
+#
 # This is the slow part of the build by a wide margin. WITH_DURABLE=false skips
 # it entirely and produces an image with Citus and the PGDG set only.
 ARG CARGO_PGRX_VERSION=0.16.1
@@ -79,8 +90,7 @@ RUN set -eux; \
     cargo pgrx init "--pg${PG_MAJOR}=/usr/lib/postgresql/${PG_MAJOR}/bin/pg_config"; \
     cargo pgrx install --release --no-default-features \
       --features "pg${PG_MAJOR}" \
-      --pg-config "/usr/lib/postgresql/${PG_MAJOR}/bin/pg_config" \
-      --sudo; \
+      --pg-config "/usr/lib/postgresql/${PG_MAJOR}/bin/pg_config"; \
     mkdir -p "/staging/usr/lib/postgresql/${PG_MAJOR}/lib" \
              "/staging/usr/share/postgresql/${PG_MAJOR}/extension"; \
     cp "/usr/lib/postgresql/${PG_MAJOR}/lib/pg_durable.so" \
