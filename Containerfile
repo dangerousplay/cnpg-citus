@@ -158,7 +158,13 @@ RUN set -eux; \
 # PGDG ships all of these for both architectures, so there is no reason to
 # compile them. Chosen to be useful without being opinionated: vector search,
 # scheduling, partition maintenance, bloat removal, index experiments,
-# approximate counting, and an audit trail.
+# approximate counting, an audit trail, and geospatial types.
+#
+# PostGIS earns its place rather than being a default: `CREATE EXTENSION
+# postgis` is the one an application cannot work around, because a table with a
+# `geography` column will not create without it. The `-scripts` package carries
+# `postgis_restore` and the upgrade paths, which a `pg_upgrade` between PostGIS
+# minors needs and which are not in the main package.
 RUN set -eux; \
     apt-get update; \
     apt-get install -y --no-install-recommends \
@@ -168,7 +174,9 @@ RUN set -eux; \
       "postgresql-${PG_MAJOR}-repack" \
       "postgresql-${PG_MAJOR}-hypopg" \
       "postgresql-${PG_MAJOR}-hll" \
-      "postgresql-${PG_MAJOR}-pgaudit"; \
+      "postgresql-${PG_MAJOR}-pgaudit" \
+      "postgresql-${PG_MAJOR}-postgis-3" \
+      "postgresql-${PG_MAJOR}-postgis-3-scripts"; \
     rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /staging/ /
@@ -183,11 +191,12 @@ COPY --from=builder /staging/ /
 # then refuses to start with "undefined symbol". barman-cloud is checked too,
 # since a careless apt step can remove it and it is CNPG's contract.
 # `vector`, not `pgvector`: the Debian package is postgresql-17-pgvector but
-# the extension it installs is called vector. Comments live outside the RUN —
+# the extension it installs is called vector. `postgis`, likewise, comes from
+# postgresql-17-postgis-3. Comments live outside the RUN —
 # a `#` line inside a backslash continuation is a parser quirk worth not
 # relying on.
 RUN set -eux; \
-    for ext in citus vector pg_cron pg_partman pg_repack hypopg hll pgaudit; do \
+    for ext in citus vector pg_cron pg_partman pg_repack hypopg hll pgaudit postgis; do \
       test -f "/usr/share/postgresql/${PG_MAJOR}/extension/${ext}.control" \
         || { echo "MISSING: ${ext}.control"; exit 1; }; \
     done; \
@@ -209,7 +218,8 @@ LABEL org.opencontainers.image.title="cnpg-citus" \
       org.opencontainers.image.licenses="PostgreSQL" \
       io.cnpg.postgres.major="${PG_MAJOR}" \
       io.cnpg.citus.version="${CITUS_VERSION}" \
-      io.cnpg.pg_durable.version="${PG_DURABLE_VERSION}"
+      io.cnpg.pg_durable.version="${PG_DURABLE_VERSION}" \
+      io.cnpg.postgis.version="3"
 
 # CloudNativePG refuses to start a container whose Postgres runs as root.
 USER 26
