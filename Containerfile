@@ -74,6 +74,16 @@ RUN set -eux; \
     rm -rf /var/lib/apt/lists/*
 
 # --- Citus ----------------------------------------------------------------- #
+# Linked against libcurl, not `--without-libcurl`. PostgreSQL 18 is itself built
+# with libcurl (OAuth), so its pg_config.h defines HAVE_LIBCURL, and Citus sees
+# that through postgres.h whatever its own configure said: the curl code is
+# compiled in but nothing links it, and the server refuses to start —
+#
+#   could not load library ".../citus.so": undefined symbol: curl_easy_perform
+#
+# Linking it costs nothing else: anonymous statistics collection stays off
+# unless ENABLE_CITUS_STATISTICS_COLLECTION is defined, which this build never
+# does (citus.enable_statistics_collection defaults to false).
 # From the release tarball rather than a git clone: a tag can be moved, and the
 # tarball is what the checksum below pins. DESTDIR stages the install so the
 # final stage copies a known tree instead of re-running make install as root.
@@ -82,7 +92,7 @@ RUN set -eux; \
       "https://github.com/citusdata/citus/archive/refs/tags/v${CITUS_VERSION}.tar.gz"; \
     mkdir -p /tmp/citus && tar -xzf /tmp/citus.tar.gz -C /tmp/citus --strip-components=1; \
     cd /tmp/citus; \
-    ./configure --without-libcurl; \
+    ./configure; \
     make -j"$(nproc)"; \
     make install DESTDIR=/staging; \
     rm -rf /tmp/citus /tmp/citus.tar.gz
@@ -176,7 +186,8 @@ RUN set -eux; \
       "postgresql-${PG_MAJOR}-hll" \
       "postgresql-${PG_MAJOR}-pgaudit" \
       "postgresql-${PG_MAJOR}-postgis-3" \
-      "postgresql-${PG_MAJOR}-postgis-3-scripts"; \
+      "postgresql-${PG_MAJOR}-postgis-3-scripts" \
+      libcurl4; \
     rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /staging/ /
