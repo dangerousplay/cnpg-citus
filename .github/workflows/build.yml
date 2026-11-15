@@ -23,10 +23,10 @@ on:
     inputs:
       citus_version:
         description: Citus version
-        default: "14.1.0"
+        default: "14.3.0"
       pg_major:
         description: PostgreSQL major
-        default: "17"
+        default: "18"
 
 permissions:
   contents: read
@@ -35,9 +35,9 @@ permissions:
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
-  PG_MAJOR: ${{ inputs.pg_major || '17' }}
-  CITUS_VERSION: ${{ inputs.citus_version || '14.1.0' }}
-  PG_DURABLE_VERSION: "0.2.5"
+  PG_MAJOR: ${{ inputs.pg_major || '18' }}
+  CITUS_VERSION: ${{ inputs.citus_version || '14.3.0' }}
+  PG_DURABLE_VERSION: "0.2.9"
 
 jobs:
   build:

@@ -10,7 +10,7 @@
 # Runs as uid 26 inside the image. Not part of the image itself — mounted in.
 set -euo pipefail
 
-PG_MAJOR="${PG_MAJOR:-17}"
+PG_MAJOR="${PG_MAJOR:-18}"
 WITH_DURABLE="${WITH_DURABLE:-true}"
 export PATH="/usr/lib/postgresql/${PG_MAJOR}/bin:${PATH}"
 export PGDATA=/tmp/smoke
@@ -53,7 +53,7 @@ pg_ctl -D "$PGDATA" -l /tmp/log -w start >/dev/null 2>&1 || {
 # pattern is how that check stops working. Removing the race is better than
 # teaching the check to ignore things.
 
-# `vector`, not `pgvector`: the Debian package is postgresql-17-pgvector
+# `vector`, not `pgvector`: the Debian package is postgresql-${PG_MAJOR}-pgvector
 # but the extension it installs is called vector.
 EXTS="citus vector pg_cron pg_partman pg_repack hypopg hll pgaudit pg_stat_statements"
 [ "$WITH_DURABLE" = "true" ] && EXTS="$EXTS pg_durable"
