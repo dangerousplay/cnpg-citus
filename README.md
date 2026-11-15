@@ -4,16 +4,16 @@ CloudNativePG-compatible PostgreSQL with Citus and a default extension set,
 built for **linux/amd64 and linux/arm64**.
 
 ```
-ghcr.io/OWNER/cnpg-citus:17-citus14.1.0
+ghcr.io/OWNER/cnpg-citus:18-citus14.3.0
 ```
 
 ## What is in it
 
 | | version | source |
 |---|---|---|
-| PostgreSQL | 17 | `ghcr.io/cloudnative-pg/postgresql` |
-| Citus | 14.1.0 | compiled from the release tarball |
-| pg_durable | 0.2.5 | compiled with cargo-pgrx |
+| PostgreSQL | 18 | `ghcr.io/cloudnative-pg/postgresql` |
+| Citus | 14.3.0 | compiled from the release tarball |
+| pg_durable | 0.2.9 | compiled with cargo-pgrx |
 | pgvector (as `vector`), pg_cron, pg_partman, pg_repack, hypopg, hll, pgaudit | PGDG | packages |
 
 Base is `ghcr.io/cloudnative-pg/postgresql`, not the official `postgres` image.
@@ -44,7 +44,7 @@ metadata:
   name: db
 spec:
   instances: 1
-  imageName: ghcr.io/OWNER/cnpg-citus:17-citus14.1.0
+  imageName: ghcr.io/OWNER/cnpg-citus:18-citus14.3.0
 
   postgresql:
     # citus, pg_cron, pgaudit and pg_durable all refuse to be created unless
@@ -172,10 +172,10 @@ fallback to amd64 would produce two identical images in a list advertising two.
 
 | tag | when |
 |---|---|
-| `17-citus14.1.0` | every build |
-| `17` | default branch only |
+| `18-citus14.3.0` | every build |
+| `18` | default branch only |
 | `v*` | git tags |
-| `17-<sha>` | every build |
+| `18-<sha>` | every build |
 
 ## Licence
 

@@ -18,17 +18,17 @@
 # WAL archiving and backup, and uid 26. Adding extensions to CNPG's image keeps
 # that contract; starting from citusdata/citus would mean rebuilding it.
 
-# PostgreSQL 17, not 18, and that is a deliberate reading of "latest stable".
-# PostgreSQL 18 itself is stable (PGDG ships 18.4), but CloudNativePG has not
-# published a stable 18 image: its 18-bookworm tag carries 18~rc1 and every
-# other 18 tag is a beta. The server binaries could be upgraded past that the
-# same way the 17 ones are, but the rest of the image — barman-cloud, the
-# entrypoint, the uid setup — would still come off a release-candidate build
-# line, and that is not a base to put a database on.
+# PostgreSQL 18. It stayed on 17 while CloudNativePG's 18 images were release
+# candidates; 18-system-bookworm now carries a stable 18.x, and Citus 14 has
+# supported 18 since 14.0. PostgreSQL 19 waits for a Citus release that
+# supports it (the pg19-support branch had open data-loss blockers in
+# 2026-11).
 #
-# Revisit when cloudnative-pg/postgresql:18-bookworm stops being an RC. Citus
-# 14.1 already supports 18, so this file will need only the two numbers.
-ARG PG_MAJOR=17
+# `-system-` explicitly: CloudNativePG now ships `minimal` and `standard`
+# flavours without barman-cloud, and the legacy unflavoured tags are aliases
+# that may not stay that way. `system` is the one that keeps barman-cloud,
+# which the last check below asserts.
+ARG PG_MAJOR=18
 ARG BASE_IMAGE=ghcr.io/cloudnative-pg/postgresql
 
 # The exact PostgreSQL package version, used on BOTH sides of the build.
@@ -37,7 +37,7 @@ ARG BASE_IMAGE=ghcr.io/cloudnative-pg/postgresql
 #
 #   FATAL: could not load library ".../citus.so": undefined symbol: palloc0_mul
 #
-# Citus is compiled against postgresql-server-dev-17 and loaded by the server
+# Citus is compiled against postgresql-server-dev-${PG_MAJOR} and loaded by the server
 # in the final stage. If those are different minors, the extension can
 # reference a backend symbol the running server does not export, and it fails
 # at load — after the image has built perfectly.
@@ -49,16 +49,16 @@ ARG BASE_IMAGE=ghcr.io/cloudnative-pg/postgresql
 # Pinning the header package to the base image's version is therefore not
 # possible; the server is upgraded to meet the headers instead, which is a
 # routine same-major minor bump that also picks up the fixes 17.6 is missing.
-ARG PG_FULL_VERSION=17.10-1.pgdg12+1
+ARG PG_FULL_VERSION=18.7-1.pgdg12+2
 
 # --------------------------------------------------------------------------- #
 # builder — compiles what has no arm64 package, then throws the toolchain away
 # --------------------------------------------------------------------------- #
-FROM ${BASE_IMAGE}:${PG_MAJOR}-bookworm AS builder
+FROM ${BASE_IMAGE}:${PG_MAJOR}-system-bookworm AS builder
 
-ARG PG_MAJOR=17
-ARG CITUS_VERSION=14.1.0
-ARG PG_DURABLE_VERSION=0.2.5
+ARG PG_MAJOR=18
+ARG CITUS_VERSION=14.3.0
+ARG PG_DURABLE_VERSION=0.2.9
 ARG WITH_DURABLE=true
 
 USER root
@@ -133,11 +133,11 @@ RUN set -eux; \
 # --------------------------------------------------------------------------- #
 # final — the base image again, plus packages and the staged build output
 # --------------------------------------------------------------------------- #
-FROM ${BASE_IMAGE}:${PG_MAJOR}-bookworm
+FROM ${BASE_IMAGE}:${PG_MAJOR}-system-bookworm
 
-ARG PG_MAJOR=17
-ARG CITUS_VERSION=14.1.0
-ARG PG_DURABLE_VERSION=0.2.5
+ARG PG_MAJOR=18
+ARG CITUS_VERSION=14.3.0
+ARG PG_DURABLE_VERSION=0.2.9
 ARG WITH_DURABLE=true
 
 USER root
@@ -190,9 +190,9 @@ COPY --from=builder /staging/ /
 # would otherwise produce an image that builds, passes every file test, and
 # then refuses to start with "undefined symbol". barman-cloud is checked too,
 # since a careless apt step can remove it and it is CNPG's contract.
-# `vector`, not `pgvector`: the Debian package is postgresql-17-pgvector but
+# `vector`, not `pgvector`: the Debian package is postgresql-${PG_MAJOR}-pgvector but
 # the extension it installs is called vector. `postgis`, likewise, comes from
-# postgresql-17-postgis-3. Comments live outside the RUN —
+# postgresql-${PG_MAJOR}-postgis-3. Comments live outside the RUN —
 # a `#` line inside a backslash continuation is a parser quirk worth not
 # relying on.
 RUN set -eux; \
